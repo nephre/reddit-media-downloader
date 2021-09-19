@@ -12,7 +12,7 @@ parser = argparse.ArgumentParser(description='Process some integers.')
 parser.add_argument('-s', '--sort', default='top', help='top or hot')
 parser.add_argument('-r', '--subreddit', help='name of the subreddit')
 parser.add_argument('-u', '--user', help='user name')
-parser.add_argument('-t', '--threads', type=int, default=1, help='parallel threads amount, default 1')
+parser.add_argument('-t', '--threads', type=int, default=1, help='parallel threads per page amount, default 1')
 
 args = parser.parse_args()
 
@@ -36,7 +36,6 @@ headers = {
 }
 
 exceptions = {}
-filenames = []
 downloads = []
 
 
@@ -57,25 +56,35 @@ def get_url(domain_name, name):
 
 def http_download(img_url, folder_name, file_name, timeout):
     if img_url in downloads:
-        print('{0} already downloaded'.format(img_url))
         return False
 
     file_suffix = os.path.splitext(img_url)[1]
     filename = '{}{}{}{}'.format(folder_name, os.sep, file_name, file_suffix)
 
-    if os.path.exists(filename) or filename in filenames:
-        print("File {0} already exists".format(filename))
-        return False
+    if os.path.exists(filename):
+        start_position = os.stat(filename).st_size
+    else:
+        start_position = 0
 
-    print("Downloading {0}".format(img_url))
-    filenames.append(filename)
+    header = r.head(img_url, timeout=timeout)
+    total_size = int(header.headers.get('content-length'))
+
+    if start_position >= total_size:
+        return
+
+    headers = None
+    if start_position > 0:
+        headers = {'Range': f'{start_position}-{total_size}'}
+
+    resp = r.get(img_url, stream=True, timeout=timeout, headers=headers)
     downloads.append(img_url)
 
-    resp = r.get(img_url, stream=True, timeout=timeout)
-    total_size = int(resp.headers.get('content-length'))
-
-        with open(filename, 'wb') as f:
-            shutil.copyfileobj(req.raw, f)
+    with open(filename, 'wb') as f, tqdm(
+        desc=img_url, total=total_size, unit='B', unit_scale=True, leave=False) as pbar:
+        for chunk in resp.iter_content(chunk_size=1024):
+            if chunk:
+                bytes = f.write(chunk)
+                pbar.update(bytes)
 
 
 def download_media(img_url, file_name, source, folder_name):
@@ -94,7 +103,6 @@ def download_media(img_url, file_name, source, folder_name):
 
         if img_url:
             http_download(img_url, folder_name, file_name, 10)
-
     except IOError as e:
         print('??????', e)
     except Exception as e:
@@ -110,7 +118,6 @@ def process_post(post):
             'downloads/{}'.format(sub_reddit))
     except KeyError:
         print("Unsupported media, skipping")
-        return
 
 
 def request_reddit(media_url, workers):
@@ -125,7 +132,6 @@ def request_reddit(media_url, workers):
                 runner.submit(process_post, post)
 
             if next_page is not None:
-                print("Heading over to next page ... ")
                 if '?' in media_url:
                     media_url = media_url + '&after=' + next_page
                 else:
