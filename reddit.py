@@ -72,10 +72,10 @@ def http_download(img_url, folder_name, file_name, timeout):
     total_size = int(header.headers.get('content-length'))
     content_type = header.headers.get('content-type')
 
-    if content_type and args.images_only and (not content_type.startswith('image/') or content_type == 'image/gif'):
+    if content_type and args.images_only and (not content_type.startswith('image/') or content_type == 'image/gif' or img_url.endswith('.gif')):
         return False
 
-    if start_position >= total_size:
+    if start_position >= total_size-1:
         return
 
     headers = None
